@@ -58,7 +58,7 @@ Usuario
 ### Clonar repositorio
 
 ```bash
-git clone https://github.com/tu-usuario/manhwa-rag-ai.git
+git clone https://github.com/cristopherRamirezU/MANHWA-RAG-AI
 cd manhwa-rag-ai/backend
 ```
 
