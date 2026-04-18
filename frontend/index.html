@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Asistente manga/Manhwa AI</title>
+</head>
+<body>
+
+<h2>Asistente de manga/Manhwas</h2>
+
+<input id="pregunta" placeholder="Escribe tu pregunta..." />
+<button onclick="enviar()">Enviar</button>
+
+<div id="respuesta"></div>
+
+<script>
+async function enviar() {
+    const pregunta = document.getElementById("pregunta").value;
+    const respuesta = document.getElementById("respuesta");
+
+    // 🔄 Estado inicial
+    respuesta.innerHTML = "🔍 Buscando información...";
+
+    try {
+        // ⏳ Cambio de mensaje mientras carga
+        setTimeout(() => {
+            respuesta.innerHTML = "📡 Rescatando datos...";
+        }, 800);
+
+        const res = await fetch("http://localhost:5000/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pregunta })
+        });
+
+        const data = await res.json();
+        let texto = data.respuesta;
+
+        // 🖼️ Detectar si hay imagen
+        if (texto.includes("Imagen:")) {
+            const partes = texto.split("Imagen:");
+            const descripcion = partes[0];
+            const imagen = partes[1].trim();
+
+            respuesta.innerHTML = `
+                <div style="white-space: pre-line; margin-bottom: 10px;">
+                    ${descripcion}
+                </div>
+                <img src="${imagen}" width="220" style="border-radius:10px;"/>
+            `;
+        } else {
+            // 🧾 Mostrar texto normal
+            respuesta.innerHTML = `<div style="white-space: pre-line;">${texto}</div>`;
+        }
+
+    } catch (error) {
+        respuesta.innerHTML = "❌ Error al obtener la respuesta.";
+        console.error(error);
+    }
+}
+</script>
+
+</body>
+</html>
