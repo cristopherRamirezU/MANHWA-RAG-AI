@@ -1,3 +1,25 @@
+# ── API y servidor ──────────────────────────────────────────────────────────
 flask
 flask-cors
 requests
+
+# ── LangChain — framework de agentes (IE2) ──────────────────────────────────
+langchain>=0.2.0
+langchain-core>=0.2.0
+langchain-community>=0.2.0
+langchain-groq>=0.1.0
+
+# ── LLM — Groq (Llama-3.3-70b) ──────────────────────────────────────────────
+groq
+
+# ── Búsqueda semántica / embeddings (IE4) ───────────────────────────────────
+sentence-transformers>=2.7.0
+numpy
+
+# ── Traducción (pipeline legado) ────────────────────────────────────────────
+transformers
+torch
+sentencepiece
+
+# ── Utilidades ───────────────────────────────────────────────────────────────
+python-dotenv

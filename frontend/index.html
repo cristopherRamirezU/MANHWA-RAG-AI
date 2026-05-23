@@ -1,62 +1,215 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-    <title>Asistente manga/Manhwa AI</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ManhwaBot — Agente IA</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #0f0f1a;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        h1 {
+            margin: 20px 0 4px;
+            font-size: 1.8rem;
+            color: #7c9ef8;
+        }
+
+        .subtitle {
+            font-size: 0.85rem;
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        #chat-box {
+            width: 100%;
+            max-width: 720px;
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 16px;
+            height: 460px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            border: 1px solid #2a2a4a;
+        }
+
+        .msg {
+            max-width: 82%;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 0.92rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .msg.user {
+            align-self: flex-end;
+            background: #2d4a8a;
+            color: #fff;
+        }
+
+        .msg.bot {
+            align-self: flex-start;
+            background: #1e2a1e;
+            border: 1px solid #2a4a2a;
+            color: #cde8cd;
+        }
+
+        .msg.thinking {
+            align-self: flex-start;
+            background: #1a1a2e;
+            border: 1px dashed #444;
+            color: #888;
+            font-style: italic;
+            font-size: 0.85rem;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 8px;
+            width: 100%;
+            max-width: 720px;
+            margin-top: 12px;
+        }
+
+        #pregunta {
+            flex: 1;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-size: 0.95rem;
+            outline: none;
+        }
+
+        #pregunta:focus { border-color: #7c9ef8; }
+
+        button {
+            padding: 12px 22px;
+            border-radius: 8px;
+            border: none;
+            background: #3d5fc4;
+            color: #fff;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover { background: #5574e0; }
+        button:disabled { background: #333; cursor: default; }
+
+        .examples {
+            width: 100%;
+            max-width: 720px;
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .chip {
+            padding: 5px 12px;
+            background: #1e2540;
+            border: 1px solid #2a3560;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            color: #aab4d4;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .chip:hover { background: #2a3560; color: #fff; }
+    </style>
 </head>
 <body>
 
-<h2>Asistente de manga/Manhwas</h2>
+<h1>ManhwaBot</h1>
+<p class="subtitle">Agente IA con memoria · LangChain + Groq Llama-3</p>
 
-<input id="pregunta" placeholder="Escribe tu pregunta..." />
-<button onclick="enviar()">Enviar</button>
+<div id="chat-box"></div>
 
-<div id="respuesta"></div>
+<div class="input-row">
+    <input id="pregunta" placeholder="Pregunta algo sobre manhwa, manga o manhua..." autocomplete="off" />
+    <button id="btn-enviar" onclick="enviar()">Enviar</button>
+</div>
+
+<div class="examples">
+    <span class="chip" onclick="preguntar('¿De qué trata Solo Leveling?')">Solo Leveling</span>
+    <span class="chip" onclick="preguntar('Recomiéndame manhwas de terror')">Terror</span>
+    <span class="chip" onclick="preguntar('Busco algo de romance escolar')">Romance escolar</span>
+    <span class="chip" onclick="preguntar('Guarda Solo Leveling con nota 10')">Guardar favorito</span>
+    <span class="chip" onclick="preguntar('¿Qué tengo en mi historial?')">Mi historial</span>
+</div>
 
 <script>
-async function enviar() {
-    const pregunta = document.getElementById("pregunta").value;
-    const respuesta = document.getElementById("respuesta");
+    const USER_ID = "usuario_" + Math.random().toString(36).slice(2, 7);
+    const chatBox  = document.getElementById("chat-box");
+    const input    = document.getElementById("pregunta");
+    const btn      = document.getElementById("btn-enviar");
 
-    // 🔄 Estado inicial
-    respuesta.innerHTML = "🔍 Buscando información...";
+    function addMsg(text, type) {
+        const div = document.createElement("div");
+        div.className = "msg " + type;
+        div.textContent = text;
+        chatBox.appendChild(div);
+        chatBox.scrollTop = chatBox.scrollHeight;
+        return div;
+    }
 
-    try {
-        // ⏳ Cambio de mensaje mientras carga
-        setTimeout(() => {
-            respuesta.innerHTML = "📡 Rescatando datos...";
-        }, 800);
+    async function enviar() {
+        const pregunta = input.value.trim();
+        if (!pregunta) return;
 
-        const res = await fetch("http://localhost:5000/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pregunta })
-        });
+        input.value = "";
+        btn.disabled = true;
+        addMsg(pregunta, "user");
 
-        const data = await res.json();
-        let texto = data.respuesta;
+        const thinking = addMsg("Pensando...", "thinking");
 
-        // 🖼️ Detectar si hay imagen
-        if (texto.includes("Imagen:")) {
-            const partes = texto.split("Imagen:");
-            const descripcion = partes[0];
-            const imagen = partes[1].trim();
+        try {
+            const res = await fetch("http://localhost:5000/agent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ pregunta, user_id: USER_ID })
+            });
 
-            respuesta.innerHTML = `
-                <div style="white-space: pre-line; margin-bottom: 10px;">
-                    ${descripcion}
-                </div>
-                <img src="${imagen}" width="220" style="border-radius:10px;"/>
-            `;
-        } else {
-            // 🧾 Mostrar texto normal
-            respuesta.innerHTML = `<div style="white-space: pre-line;">${texto}</div>`;
+            const data = await res.json();
+            thinking.remove();
+
+            if (data.error) {
+                addMsg("Error: " + data.error, "thinking");
+            } else {
+                addMsg(data.respuesta, "bot");
+            }
+        } catch (err) {
+            thinking.remove();
+            addMsg("No se pudo conectar con el servidor.", "thinking");
+            console.error(err);
         }
 
-    } catch (error) {
-        respuesta.innerHTML = "❌ Error al obtener la respuesta.";
-        console.error(error);
+        btn.disabled = false;
+        input.focus();
     }
-}
+
+    function preguntar(texto) {
+        input.value = texto;
+        enviar();
+    }
+
+    input.addEventListener("keydown", e => { if (e.key === "Enter") enviar(); });
 </script>
 
 </body>

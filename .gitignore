@@ -1,0 +1,46 @@
+# ── Secretos y configuración local ──────────────────────────────────────────
+.env
+*.key
+*.secret
+
+# ── Claude Code (archivos del asistente IA — NO subir al repo) ──────────────
+.claude/
+MEMORY.md
+memory/
+CLAUDE.md
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# ── Entornos virtuales ────────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+
+# ── Caché de modelos de HuggingFace / sentence-transformers ──────────────────
+.cache/
+*.bin
+*.safetensors
+
+# ── Datos de sesiones de usuario (generados en runtime) ──────────────────────
+backend/data/sessions/
+
+# ── IDEs ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user
+
+# ── Sistema operativo ─────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/

@@ -1,13 +1,20 @@
 import json
 import requests
-from transformers import MarianMTModel, MarianTokenizer
 
 # ================================
-# MODELO DE TRADUCCIÓN
+# MODELO DE TRADUCCIÓN (carga lazy)
 # ================================
 modelo_nombre = "Helsinki-NLP/opus-mt-en-es"
-tokenizer = MarianTokenizer.from_pretrained(modelo_nombre)
-model = MarianMTModel.from_pretrained(modelo_nombre)
+_tokenizer = None
+_model = None
+
+def _get_translation_model():
+    global _tokenizer, _model
+    if _tokenizer is None:
+        from transformers import MarianMTModel, MarianTokenizer
+        _tokenizer = MarianTokenizer.from_pretrained(modelo_nombre)
+        _model = MarianMTModel.from_pretrained(modelo_nombre)
+    return _tokenizer, _model
 
 # ================================
 # DATOS INTERNOS
@@ -99,9 +106,10 @@ def mapear_tipo(tipo_api):
 # TRADUCCIÓN
 # ================================
 def traducir_texto(texto):
-    tokens = tokenizer(texto, return_tensors="pt", padding=True, truncation=True)
-    traduccion = model.generate(**tokens)
-    return tokenizer.decode(traduccion[0], skip_special_tokens=True)
+    tok, mod = _get_translation_model()
+    tokens = tok(texto, return_tensors="pt", padding=True, truncation=True)
+    traduccion = mod.generate(**tokens)
+    return tok.decode(traduccion[0], skip_special_tokens=True)
 
 # ================================
 # DETECTAR INTENCIÓN
