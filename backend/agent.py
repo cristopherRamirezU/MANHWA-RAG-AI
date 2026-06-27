@@ -8,15 +8,26 @@ Ciclo ReAct:
   1. LLM genera: Thought → Action → Action Input
   2. Sistema ejecuta la herramienta e inyecta: Observation
   3. LLM continúa hasta generar: Final Answer
+
+EP3 — Instrumentación de observabilidad:
+  - Latencia total del request (ms)
+  - Latencia por llamada a herramienta (ms)
+  - Conteo de iteraciones ReAct
+  - Tokens de entrada y salida acumulados (de la API Groq)
+  - Herramientas invocadas por orden
+  - Consistencia de respuesta (Jaccard vs última respuesta a la misma query)
+  - Registro de errores con mensaje
 """
 
 import os
 import re
+import time
 from dotenv import load_dotenv
 from groq import Groq
 
 from memory_manager import MemoryManager
 from tools import fn_buscar_manhwa, fn_recomendar_por_genero
+import observability
 
 load_dotenv()
 
@@ -89,63 +100,125 @@ class ManhwaAgent:
         self.user_id = user_id
         self.memory = MemoryManager(user_id)
         self.client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+        self._response_cache: dict[str, str] = {}  # para cálculo de consistencia
 
     def chat(self, user_message: str) -> str:
-        """Ejecuta el loop ReAct y devuelve la respuesta final."""
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        """
+        Ejecuta el loop ReAct y devuelve la respuesta final.
+        Instrumentado con métricas de observabilidad (EP3).
+        """
+        start_time = time.monotonic()
+        tools_used: list[str] = []
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        iterations_done = 0
+        final_response: str | None = None
+        error_msg: str | None = None
 
-        # Historial de corto plazo
-        history = self.memory.get_short_term_history()
-        if history:
-            for line in history.strip().split("\n"):
-                if line.startswith("Human:"):
-                    messages.append({"role": "user", "content": line[6:].strip()})
-                elif line.startswith("AI:"):
-                    messages.append({"role": "assistant", "content": line[3:].strip()})
+        try:
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-        messages.append({"role": "user", "content": user_message})
+            # Historial de corto plazo
+            history = self.memory.get_short_term_history()
+            if history:
+                for line in history.strip().split("\n"):
+                    if line.startswith("Human:"):
+                        messages.append({"role": "user", "content": line[6:].strip()})
+                    elif line.startswith("AI:"):
+                        messages.append({"role": "assistant", "content": line[3:].strip()})
 
-        for iteration in range(self.MAX_ITERATIONS):
-            response = self.client.chat.completions.create(
-                model=self.MODEL,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=1024,
-                stop=["Observation:"],          # Detiene antes de que el modelo escriba la observación
-            )
+            messages.append({"role": "user", "content": user_message})
 
-            text = (response.choices[0].message.content or "").strip()
-            print(f"\n[Agente iter {iteration + 1}]\n{text}\n")
+            for iteration in range(self.MAX_ITERATIONS):
+                iterations_done = iteration + 1
 
-            # ── Respuesta final detectada ──────────────────────────────
-            if "Final Answer:" in text:
-                final = text.split("Final Answer:", 1)[1].strip()
-                self.memory.save_exchange(user_message, final)
-                return final
+                response = self.client.chat.completions.create(
+                    model=self.MODEL,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=1024,
+                    stop=["Observation:"],
+                )
 
-            # ── Parsear Action y Action Input ──────────────────────────
-            action_match = re.search(r"Action:\s*(.+?)(?:\n|$)", text)
-            input_match  = re.search(r"Action Input:\s*(.+?)(?:\n|$)", text, re.DOTALL)
+                # Acumular tokens de cada llamada al LLM
+                if response.usage:
+                    total_prompt_tokens += response.usage.prompt_tokens
+                    total_completion_tokens += response.usage.completion_tokens
 
-            if not action_match:
-                # El modelo no usó el formato — devolver texto como respuesta
-                self.memory.save_exchange(user_message, text)
-                return text
+                text = (response.choices[0].message.content or "").strip()
+                print(f"\n[Agente iter {iteration + 1}]\n{text}\n")
 
-            action      = action_match.group(1).strip()
-            tool_input  = input_match.group(1).strip() if input_match else ""
+                # ── Respuesta final detectada ──────────────────────────
+                if "Final Answer:" in text:
+                    final_response = text.split("Final Answer:", 1)[1].strip()
+                    self.memory.save_exchange(user_message, final_response)
+                    break
 
-            # ── Ejecutar herramienta ───────────────────────────────────
-            result = _dispatch(action, tool_input, self.memory)
-            print(f"[Tool] {action}({tool_input!r}) → {result[:200]}")
+                # ── Parsear Action y Action Input ──────────────────────
+                action_match = re.search(r"Action:\s*(.+?)(?:\n|$)", text)
+                input_match = re.search(r"Action Input:\s*(.+?)(?:\n|$)", text, re.DOTALL)
 
-            # ── Inyectar observación y continuar el loop ───────────────
-            messages.append({"role": "assistant", "content": text})
-            messages.append({"role": "user",      "content": f"Observation: {result}"})
+                if not action_match:
+                    # Modelo no siguió el formato — devolver texto tal cual
+                    final_response = text
+                    self.memory.save_exchange(user_message, final_response)
+                    break
 
-        output = "No pude completar la respuesta tras varios intentos."
-        self.memory.save_exchange(user_message, output)
-        return output
+                action = action_match.group(1).strip()
+                tool_input = input_match.group(1).strip() if input_match else ""
+
+                # ── Ejecutar herramienta con medición de latencia ──────
+                tool_start = time.monotonic()
+                result = _dispatch(action, tool_input, self.memory)
+                tool_latency_ms = (time.monotonic() - tool_start) * 1000
+
+                tools_used.append(action)
+                is_tool_success = not result.startswith("Herramienta '")
+
+                observability.log_tool_call(
+                    herramienta=action,
+                    tool_input=tool_input,
+                    resultado_len=len(result),
+                    latencia_ms=tool_latency_ms,
+                    exito=is_tool_success,
+                )
+
+                print(f"[Tool] {action}({tool_input!r}) → {result[:200]}")
+
+                # ── Inyectar observación y continuar el loop ───────────
+                messages.append({"role": "assistant", "content": text})
+                messages.append({"role": "user", "content": f"Observation: {result}"})
+
+            if final_response is None:
+                final_response = "No pude completar la respuesta tras varios intentos."
+                self.memory.save_exchange(user_message, final_response)
+
+        except Exception as exc:
+            error_msg = str(exc)
+            final_response = "Ocurrió un error al procesar tu pregunta. Intenta de nuevo."
+            print(f"[Agente ERROR] {error_msg}")
+
+        # ── Métricas de observabilidad ─────────────────────────────────
+        latencia_ms = (time.monotonic() - start_time) * 1000
+        exito = error_msg is None and final_response != "No pude completar la respuesta tras varios intentos."
+
+        consistencia = observability.compute_consistency(user_message, final_response)
+
+        observability.log_request(
+            user_id=self.user_id,
+            pregunta=user_message,
+            respuesta=final_response,
+            latencia_ms=latencia_ms,
+            iteraciones=iterations_done,
+            herramientas=tools_used,
+            tokens_entrada=total_prompt_tokens,
+            tokens_salida=total_completion_tokens,
+            exito=exito,
+            consistencia=consistencia,
+            error=error_msg,
+        )
+
+        return final_response
 
 
 # ---------------------------------------------------------------------------

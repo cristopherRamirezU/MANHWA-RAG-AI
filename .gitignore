@@ -44,3 +44,6 @@ desktop.ini
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
 logs/
+
+# ── Métricas de observabilidad EP3 (contienen hashes de usuarios) ────────────
+backend/data/logs/

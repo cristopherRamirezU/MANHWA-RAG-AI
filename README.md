@@ -1,11 +1,12 @@
-# ManhwaBot — Agente RAG con Memoria y Planificación
+# ManhwaBot — Agente RAG con Memoria, Planificación y Observabilidad
 
 > Asistente conversacional inteligente para consultas sobre manhwa, manga y manhua.  
-> Arquitectura de agente **ReAct** (Reasoning + Acting) con memoria de corto y largo plazo.
+> Arquitectura de agente **ReAct** (Reasoning + Acting) con memoria de corto y largo plazo,  
+> instrumentado con métricas de observabilidad y dashboard de monitoreo.
 
 **Curso:** ISY0101 — Ingeniería de Soluciones con IA  
 **Autores:** Cristopher Alexander Ramírez Ubilla  
-**Versión:** 2.0 — Agente Funcional
+**Versión:** 3.0 — Observabilidad y Seguridad (EP3)
 
 ---
 
@@ -14,14 +15,16 @@
 1. [Descripción General](#descripción-general)
 2. [Arquitectura del Sistema](#arquitectura-del-sistema)
 3. [Componentes Implementados](#componentes-implementados)
-4. [Decisiones de Diseño](#decisiones-de-diseño)
-5. [Instalación paso a paso](#instalación-paso-a-paso)
-6. [Cómo usar la aplicación](#cómo-usar-la-aplicación)
-7. [Límites del sistema](#límites-del-sistema)
-8. [API Endpoints](#api-endpoints)
-9. [Flujos de Trabajo](#flujos-de-trabajo)
-10. [Estructura del Repositorio](#estructura-del-repositorio)
-11. [Referencias Bibliográficas](#referencias-bibliográficas)
+4. [EP3 — Observabilidad y Seguridad](#ep3--observabilidad-y-seguridad)
+5. [Decisiones de Diseño](#decisiones-de-diseño)
+6. [Instalación paso a paso](#instalación-paso-a-paso)
+7. [Cómo usar la aplicación](#cómo-usar-la-aplicación)
+8. [Dashboard de Observabilidad](#dashboard-de-observabilidad)
+9. [Límites del sistema](#límites-del-sistema)
+10. [API Endpoints](#api-endpoints)
+11. [Flujos de Trabajo](#flujos-de-trabajo)
+12. [Estructura del Repositorio](#estructura-del-repositorio)
+13. [Referencias Bibliográficas](#referencias-bibliográficas)
 
 ---
 
@@ -180,6 +183,64 @@ Mantiene el endpoint `/chat` original. Usa MarianMT para traducción EN→ES con
 
 ---
 
+---
+
+## EP3 — Observabilidad y Seguridad
+
+### Inicio rápido EP3
+
+```bash
+# 1. Instalar dependencias (incluye streamlit, pandas, plotly, matplotlib)
+pip install -r requirements.txt
+
+# 2. Generar datos de demostración (no requiere API key)
+python tests/seed_metrics.py
+
+# 3. Lanzar el dashboard de observabilidad
+python -m streamlit run dashboard/streamlit_app.py
+
+# 4. Generar informe HTML + gráficos PNG para el informe Word
+python tests/generate_report.py
+
+# 5. (Opcional) Iniciar el backend para generar métricas reales
+cd backend && python app.py
+```
+
+### Métricas implementadas
+
+| Categoría | Métrica | Archivo | IE |
+|---|---|---|---|
+| Precisión / Éxito | Tasa de requests con `Final Answer` vs timeout/error | `requests.jsonl` | IE1 |
+| Consistencia | Similitud Jaccard entre respuestas a la misma query | `requests.jsonl` | IE1 |
+| Frecuencia de errores | % de requests con excepción o sin `Final Answer` | `requests.jsonl` | IE1 |
+| Latencia total | Tiempo extremo a extremo por request (ms) | `requests.jsonl` | IE2 |
+| Latencia por herramienta | Tiempo de ejecución de cada tool call (ms) | `tools.jsonl` | IE2 |
+| Tokens consumidos | prompt_tokens + completion_tokens acumulados | `requests.jsonl` | IE2 |
+| Iteraciones ReAct | Número de ciclos Thought→Action por request | `requests.jsonl` | IE3 |
+| Frecuencia de herramientas | Distribución de llamadas por nombre de herramienta | `tools.jsonl` | IE3 |
+
+### Seguridad y uso responsable (IE6)
+
+| Protocolo | Implementación | Archivo |
+|---|---|---|
+| Validación de entrada | Límite 500 chars + blocklist de jailbreak (regex) | `backend/security.py` |
+| Sanitización | Eliminación de caracteres de control (OWASP LLM01) | `backend/security.py` |
+| Rate limiting | Ventana deslizante 20 req/min por user_id | `backend/security.py` |
+| Path traversal | Sanitización de user_id (solo `[a-zA-Z0-9_-]`) | `backend/security.py` |
+| Privacidad | user_id hasheado con SHA-256 en logs; pregunta no persiste | `backend/observability.py` |
+| No exposición de errores | Stack traces solo en logs del servidor, nunca al cliente | `backend/app.py` |
+| Restricción de dominio | System Prompt rechaza preguntas fuera de manhwa/manga | `backend/agent.py` |
+
+### Detección de anomalías (IE4)
+
+El dashboard detecta automáticamente tres tipos de anomalías en los registros:
+
+1. **Latencia alta** — requests con latencia > μ + 2σ (outliers estadísticos)
+2. **Timeout de planificación** — requests que alcanzan las 6 iteraciones máximas sin `Final Answer`
+3. **Excepción en ejecución** — requests con error de la API Groq u otra excepción
+
+---
+
 ## Decisiones de Diseño
 
 ### ¿Por qué Groq SDK directo en vez de LangChain Agents?
@@ -279,6 +340,67 @@ En VS Code: clic derecho → **Open with Live Server**.
 
 ---
 
+## Dashboard de Observabilidad
+
+### Generar datos de demostración (sin API key)
+
+```bash
+python tests/seed_metrics.py
+```
+
+Genera ~100 registros sintéticos en `backend/data/logs/` para visualizar el dashboard sin necesidad de ejecutar el agente real.
+
+### Iniciar el dashboard
+
+```bash
+python -m streamlit run dashboard/streamlit_app.py
+```
+
+Abre automáticamente en [http://localhost:8501](http://localhost:8501).
+
+> **Nota Windows:** si `streamlit` no se reconoce como comando, usa siempre `python -m streamlit run`.
+
+### Secciones del dashboard
+
+| Sección | Contenido | IE |
+|---|---|---|
+| KPIs globales | Total requests, latencia prom., tasa de éxito/error, tokens | IE1, IE2 |
+| Latencia | Línea temporal, histograma, percentiles p50/p75/p90/p95/p99 | IE2 |
+| Comportamiento | Distribución de iteraciones, uso de herramientas, tokens | IE3 |
+| Alertas / Anomalías | Outliers estadísticos, timeouts, excepciones marcados en el tiempo | IE4 |
+| Análisis de herramientas | Latencia y tasa de éxito por herramienta | IE3, IE5 |
+| Consistencia | Distribución de similitud Jaccard de respuestas repetidas | IE1 |
+| Log Explorer | Tabla filtrable de últimos 50 requests con errores destacados | IE3 |
+| Recomendaciones | Propuestas automáticas basadas en métricas observadas | IE7 |
+
+### Generar informe EP3 con gráficos PNG
+
+```bash
+python tests/generate_report.py
+```
+
+Crea `informe_ep3.html` (informe completo con estadísticas reales) y la carpeta `evidencia/` con 6 gráficos PNG listos para insertar en Word.
+
+### Consultar métricas por API
+
+```bash
+curl http://127.0.0.1:5000/metrics/summary
+```
+
+```json
+{
+  "total_requests": 108,
+  "tasa_exito": 0.944,
+  "latencia_promedio_ms": 2211.3,
+  "latencia_p95_ms": 5840.2,
+  "tokens_promedio": 637,
+  "herramienta_mas_usada": "buscar_manhwa",
+  "total_errores": 6
+}
+```
+
+---
+
 ## Cómo usar la aplicación
 
 ### Preguntas sobre manhwa (flujo normal)
@@ -356,9 +478,10 @@ Bot:    Solo puedo ayudarte con manhwa, manga y manhua.
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `GET` | `/health` | Estado del servidor |
+| `GET` | `/health` | Estado del servidor y versión |
 | `POST` | `/chat` | Pipeline RAG legado (sin agente) |
-| `POST` | `/agent` | Agente ReAct con memoria |
+| `POST` | `/agent` | Agente ReAct con memoria y observabilidad |
+| `GET` | `/metrics/summary` | Resumen estadístico de métricas en tiempo real |
 
 ### Ejemplo de petición
 
@@ -440,22 +563,31 @@ Similitud coseno contra todos los embeddings del corpus
 ```
 MANHWA-RAG-AI/
 ├── backend/
-│   ├── app.py                  API Flask (/chat, /agent, /health)
-│   ├── agent.py                Agente ReAct con Groq SDK
+│   ├── app.py                  API Flask (/chat, /agent, /health, /metrics/summary)
+│   ├── agent.py                Agente ReAct con Groq SDK — instrumentado EP3
+│   ├── observability.py        Recolección de métricas JSONL (EP3 — IE1, IE2, IE3)
+│   ├── security.py             Validación, rate limiting, privacidad (EP3 — IE6)
 │   ├── tools.py                Herramientas del agente (IE1)
 │   ├── memory_manager.py       Memoria corto y largo plazo (IE3)
 │   ├── semantic_search.py      Búsqueda semántica con embeddings (IE4)
-│   ├── rag_pipeline.py         Pipeline RAG legado
+│   ├── rag_pipeline.py         Pipeline RAG legado (EP1)
 │   └── data/
 │       ├── manhwas.json        Base de datos local (10 títulos)
-│       └── sessions/           Memorias LP por usuario — en .gitignore
+│       ├── sessions/           Memorias LP por usuario — en .gitignore
+│       └── logs/               Métricas JSONL (EP3) — en .gitignore
+│           ├── requests.jsonl  Métricas por request
+│           └── tools.jsonl     Métricas por llamada a herramienta
+├── dashboard/
+│   └── streamlit_app.py        Dashboard de observabilidad (EP3 — IE5, IE4, IE7)
 ├── frontend/
 │   └── index.html              Interfaz web de chat
 ├── tests/
-│   └── test_agent.py           Demostración de toma de decisiones (IE6)
+│   ├── test_agent.py           Demostración de toma de decisiones (7 escenarios)
+│   ├── seed_metrics.py         Generador de datos de demo para dashboard (EP3)
+│   └── generate_report.py      Genera informe_ep3.html y gráficos PNG en evidencia/ (EP3)
 ├── .env.example                Plantilla de API Key — NO incluir .env real
-├── .gitignore                  Excluye .env, venv, __pycache__, .claude/, etc.
-├── requirements.txt            Dependencias del proyecto
+├── .gitignore                  Excluye .env, venv, __pycache__, logs/, .claude/
+├── requirements.txt            Dependencias del proyecto (incluye streamlit, pandas, plotly)
 └── README.md                   Este archivo
 ```
 
